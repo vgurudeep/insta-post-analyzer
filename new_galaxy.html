@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>My Interest Universe</title>
+    <!-- 1. Load Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://unpkg.com/three-spritetext"></script>
+
+    <style>
+      body {
+        margin: 0;
+        background: #000005;
+        overflow: hidden;
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      /* Minimal UI Overlay */
+      #ui-layer {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 10;
+        pointer-events: none;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 400;
+        color: #fff;
+        letter-spacing: 2px;
+        opacity: 0.8;
+      }
+
+      p {
+        color: #666;
+        font-size: 12px;
+        margin-top: 5px;
+      }
+
+      /* Search Bar */
+      .search-container {
+        pointer-events: auto;
+        margin-top: 15px;
+      }
+
+      input#search {
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid #333;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        width: 200px;
+        font-size: 13px;
+        outline: none;
+        transition: border 0.3s;
+      }
+
+      input#search:focus {
+        border-color: #555;
+        background: rgba(0, 0, 0, 0.8);
+      }
+
+      /* Tooltip */
+      .scene-tooltip {
+        background: rgba(0, 0, 0, 0.9) !important;
+        border: 1px solid #333;
+        padding: 10px;
+        border-radius: 4px;
+        color: #eee !important;
+        max-width: 250px;
+        pointer-events: none;
+      }
+      .tooltip-img {
+        width: 100%;
+        height: 150px;
+        object-fit: cover;
+        margin-bottom: 8px;
+        border: 1px solid #222;
+      }
+      .tooltip-user {
+        color: #888;
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .tooltip-cap {
+        font-size: 12px;
+        line-height: 1.4;
+        color: #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui-layer">
+      <h1>UNIVERSE</h1>
+      <p>Interactive Knowledge Graph</p>
+      <div class="search-container">
+        <input
+          type="text"
+          id="search"
+          placeholder="Filter nodes..."
+          oninput="searchNodes(this.value)"
+        />
+      </div>
+    </div>
+
+    <div id="3d-graph"></div>
+
+    <!-- Load Data (Updated to your new file) -->
+    <script src="new_galaxy_data.js"></script>
+
+    <script>
+      // Check if data loaded
+      if (typeof window.GALAXY_DATA === "undefined") {
+        document.body.innerHTML =
+          "<h1 style='color:white;text-align:center;margin-top:20%'>Error: new_galaxy_data.js not found.</h1>";
+      }
+
+      const graphData = window.GALAXY_DATA;
+
+      // --- SPACING ADJUSTMENT ---
+      // Multiply coordinates to spread nodes out for easier interaction
+      const SPREAD = 4;
+      graphData.nodes.forEach((node) => {
+        node.fx *= SPREAD;
+        node.fy *= SPREAD;
+        node.fz *= SPREAD;
+      });
+
+      // Configuration
+      const PALETTE = [
+        "#e6194b",
+        "#3cb44b",
+        "#ffe119",
+        "#4363d8",
+        "#f58231",
+        "#911eb4",
+        "#46f0f0",
+        "#f032e6",
+        "#bcf60c",
+        "#fabebe",
+        "#008080",
+        "#e6beff",
+        "#9a6324",
+        "#fffac8",
+        "#800000",
+        "#aaffc3",
+        "#808000",
+        "#ffd8b1",
+        "#000075",
+        "#808080",
+      ];
+
+      // Assign colors based on group ID (since Python doesn't assign specific hex codes)
+      graphData.nodes.forEach((node) => {
+        node.color = PALETTE[node.group % PALETTE.length];
+      });
+
+      graphData.links.forEach((link) => {
+        // We need to look up the group from the source/target to color the link
+        // Note: In ForceGraph, initially links are just IDs, later they become objects.
+        // We'll set a default property here, but the renderer handles coloring.
+        link.color = "#333"; // Default, will update in renderer
+      });
+
+      // --- RENDERER SETUP ---
+      const sphereGeo = new THREE.SphereGeometry(2, 6, 6); // Low poly, small
+
+      const Graph = ForceGraph3D()(document.getElementById("3d-graph"))
+        .graphData(graphData)
+
+        // PHYSICS: Stop physics immediately. We use the AI-calculated X/Y/Z positions.
+        .cooldownTicks(0)
+
+        // --- CUSTOM OBJECTS ---
+        .nodeThreeObject((node) => {
+          if (node.type === "center") {
+            // 3D Text Label for Categories
+            const sprite = new SpriteText(node.name);
+            sprite.material.depthWrite = false;
+            sprite.color = "#ffffff";
+            sprite.textHeight = 12; // Slightly larger text
+            sprite.fontWeight = "bold";
+            sprite.backgroundColor = "rgba(0,0,0,0.5)";
+            sprite.padding = 6;
+            sprite.borderRadius = 4;
+            return sprite;
+          } else {
+            // Post Node (Small Sphere)
+            const material = new THREE.MeshBasicMaterial({ color: node.color });
+            const mesh = new THREE.Mesh(sphereGeo, material);
+            return mesh;
+          }
+        })
+
+        // --- LINKS ---
+        .linkWidth(0.5)
+        .linkOpacity(0.2)
+        .linkColor((link) => {
+          // Find the source node to match its color
+          // ForceGraph converts link.source from ID to Object automatically after init
+          const sourceNode = graphData.nodes.find(
+            (n) => n.id === (link.source.id || link.source)
+          );
+          return sourceNode ? sourceNode.color : "#555";
+        })
+
+        // --- TOOLTIPS ---
+        .nodeLabel((node) => {
+          if (node.type === "center") return ""; // No tooltip for text labels
+          return `
+                <div class="scene-tooltip">
+                    <div class="tooltip-user">@${node.user}</div>
+                    ${
+                      node.img
+                        ? `<img src="${node.img}" class="tooltip-img" />`
+                        : ""
+                    }
+                    <div class="tooltip-cap">${node.caption}</div>
+                </div>`;
+        })
+
+        // --- INTERACTION ---
+        .onNodeClick((node) => {
+          if (node.type === "post") window.open(node.link, "_blank");
+        })
+
+        // --- SCENE SETTINGS ---
+        .backgroundColor("#000005")
+        .showNavInfo(false);
+
+      // --- ANIMATION ---
+      let angle = 0;
+      let isRotating = true;
+      document.addEventListener("mousedown", () => (isRotating = false));
+      document
+        .getElementById("search")
+        .addEventListener("focus", () => (isRotating = false));
+
+      setInterval(() => {
+        if (isRotating) {
+          Graph.cameraPosition({
+            x: 2000 * Math.sin(angle), // Expanded orbit radius
+            z: 2000 * Math.cos(angle),
+          });
+          angle += 0.0005;
+        }
+      }, 16);
+
+      // --- SEARCH FUNCTION ---
+      function searchNodes(query) {
+        const lower = query.toLowerCase();
+        let found = null;
+
+        graphData.nodes.forEach((node) => {
+          if (!node.__threeObj) return;
+
+          // Show/Hide logic
+          if (!query) {
+            node.__threeObj.visible = true;
+            if (node.type === "post") node.__threeObj.scale.set(1, 1, 1);
+            return;
+          }
+
+          // Match against Caption or Category Name
+          const match =
+            (node.caption || "").toLowerCase().includes(lower) ||
+            (node.name || "").toLowerCase().includes(lower);
+
+          if (match) {
+            node.__threeObj.visible = true;
+            if (node.type === "post") {
+              node.__threeObj.scale.set(3, 3, 3); // Highlight matched posts
+              node.__threeObj.material.color.set(0xffffff);
+            }
+            if (!found && node.type === "post") found = node;
+          } else {
+            node.__threeObj.visible = false;
+          }
+        });
+
+        if (found) {
+          isRotating = false;
+          const dist = 1.5;
+          Graph.cameraPosition(
+            { x: found.fx * dist, y: found.fy * dist, z: found.fz * dist },
+            { x: found.fx, y: found.fy, z: found.fz },
+            2000
+          );
+        }
+      }
+    </script>
+  </body>
+</html>

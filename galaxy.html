@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>My Interest Universe</title>
+    <!-- FIX: Use a specific, stable version of Three.js from CDNJS to ensure global 'THREE' is defined -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <!-- Load 3D Graph Library -->
+    <script src="https://unpkg.com/3d-force-graph"></script>
+
+    <style>
+      body {
+        margin: 0;
+        background: #000005;
+        overflow: hidden;
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      /* UI Overlay */
+      #ui-layer {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 10;
+        pointer-events: none; /* Let clicks pass through to graph */
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        font-weight: 300;
+        background: linear-gradient(to right, #00d2ff, #3a7bd5);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 20px rgba(0, 210, 255, 0.3);
+      }
+
+      p {
+        color: #8899a6;
+        font-size: 13px;
+        margin-top: 5px;
+        max-width: 300px;
+        line-height: 1.5;
+      }
+
+      /* Search Bar */
+      .search-container {
+        margin-top: 20px;
+        pointer-events: auto;
+        position: relative;
+      }
+
+      input#search {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: white;
+        padding: 10px 15px;
+        border-radius: 20px;
+        width: 250px;
+        font-size: 14px;
+        outline: none;
+        transition: all 0.3s;
+        backdrop-filter: blur(5px);
+      }
+
+      input#search:focus {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: #00d2ff;
+        box-shadow: 0 0 15px rgba(0, 210, 255, 0.3);
+      }
+
+      /* Tooltip */
+      .scene-tooltip {
+        background: rgba(10, 10, 16, 0.95) !important;
+        border: 1px solid #2a2a35;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        border-radius: 12px;
+        padding: 0;
+        color: #fff !important;
+        max-width: 280px;
+        overflow: hidden;
+        font-family: sans-serif;
+      }
+
+      .tooltip-img-container {
+        width: 100%;
+        height: 200px;
+        background: #000;
+        overflow: hidden;
+      }
+
+      .tooltip-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .tooltip-content {
+        padding: 12px;
+      }
+
+      .tooltip-user {
+        font-size: 11px;
+        color: #00d2ff;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+      }
+
+      .tooltip-cap {
+        font-size: 13px;
+        line-height: 1.4;
+        color: #e1e1e1;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui-layer">
+      <h1>Interest Galaxy</h1>
+      <p>
+        Your saved posts organized by AI.<br />Hover to preview. Click to visit.
+      </p>
+
+      <div class="search-container">
+        <input
+          type="text"
+          id="search"
+          placeholder="Search keywords (e.g., 'pasta')..."
+          oninput="searchNodes(this.value)"
+        />
+      </div>
+    </div>
+
+    <div id="3d-graph"></div>
+
+    <!-- Load Data -->
+    <script src="galaxy_data.js"></script>
+
+    <script>
+      if (typeof window.GALAXY_DATA === "undefined") {
+        document.body.innerHTML =
+          "<h1 style='color:white;text-align:center;margin-top:20%'>Error: galaxy_data.js not found.</h1>";
+      }
+
+      const data = window.GALAXY_DATA;
+
+      // 1. PERFORMANCE: Create a glowing star texture once to reuse
+      // This is much faster than calculating 3D geometry for every node
+      function createStarTexture() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 32;
+        canvas.height = 32;
+        const context = canvas.getContext("2d");
+        const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+        gradient.addColorStop(0.2, "rgba(255, 255, 255, 0.8)");
+        gradient.addColorStop(0.5, "rgba(255, 255, 255, 0.2)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 32, 32);
+
+        const texture = new THREE.Texture(canvas);
+        texture.needsUpdate = true;
+        return texture;
+      }
+
+      // Wait for window load to ensure THREE is fully available
+      let starTexture;
+      try {
+        starTexture = createStarTexture();
+      } catch (e) {
+        console.error("Three.js not loaded yet", e);
+      }
+
+      // 2. Setup Graph
+      const Graph = ForceGraph3D()(document.getElementById("3d-graph"))
+        .graphData(data)
+
+        // PHYSICS OPTIMIZATION: Stop calculating physics after it settles
+        .cooldownTicks(100)
+        .warmupTicks(20) // Calculate a bit before showing to avoid "explosion" look
+
+        // CUSTOM VISUALS: Use Sprites (2D images) instead of Spheres
+        .nodeThreeObject((node) => {
+          if (!starTexture) return false; // Fallback if texture failed
+
+          const material = new THREE.SpriteMaterial({
+            map: starTexture,
+            color: node.color, // We will set this dynamically
+            transparent: true,
+            opacity: 0.9,
+            blending: THREE.AdditiveBlending, // Makes them glow when overlapping
+          });
+          const sprite = new THREE.Sprite(material);
+          sprite.scale.set(12, 12, 1); // Size of the star
+          return sprite;
+        })
+
+        // AUTO COLOR: We still calculate color for the tooltip,
+        // but the sprite handles the visual
+        .nodeAutoColorBy("group")
+
+        // TOOLTIP
+        .nodeLabel(
+          (node) => `
+                <div class="scene-tooltip">
+                    <div class="tooltip-img-container">
+                        ${
+                          node.img
+                            ? `<img src="${node.img}" class="tooltip-img" />`
+                            : ""
+                        }
+                    </div>
+                    <div class="tooltip-content">
+                        <div class="tooltip-user">@${node.user}</div>
+                        <div class="tooltip-cap">${node.caption}</div>
+                    </div>
+                </div>
+            `
+        )
+
+        // INTERACTION
+        .onNodeClick((node) => window.open(node.link, "_blank"))
+        .onNodeHover((node) => {
+          document.body.style.cursor = node ? "pointer" : null;
+        })
+
+        // ENVIRONMENT
+        .backgroundColor("#000005")
+        .showNavInfo(false)
+        .linkOpacity(0); // Hide lines for cleaner look
+
+      // 3. Post-Processing adjustments
+      // We wait for the graph to init to grab the color assigned by .nodeAutoColorBy
+      setTimeout(() => {
+        Graph.d3Force("charge").strength(-50); // Spread them out nicely
+
+        // Apply the auto-generated colors to our sprites
+        data.nodes.forEach((node) => {
+          if (node.__threeObj) {
+            node.__threeObj.material.color.set(node.color);
+          }
+        });
+      }, 100);
+
+      // 4. Camera Animation (Slow Orbit)
+      let angle = 0;
+      let isRotationActive = true;
+
+      // Stop rotation if user interacts
+      document.getElementById("3d-graph").addEventListener("mousedown", () => {
+        isRotationActive = false;
+      });
+      document.getElementById("search").addEventListener("focus", () => {
+        isRotationActive = false;
+      });
+
+      setInterval(() => {
+        if (isRotationActive) {
+          Graph.cameraPosition({
+            x: 600 * Math.sin(angle),
+            z: 600 * Math.cos(angle),
+          });
+          angle += 0.0005;
+        }
+      }, 16);
+
+      // 5. Search Function
+      function searchNodes(query) {
+        if (!query) {
+          // Reset visibility
+          data.nodes.forEach((node) => {
+            if (node.__threeObj) {
+              node.__threeObj.material.opacity = 0.9;
+              node.__threeObj.scale.set(12, 12, 1);
+            }
+          });
+          return;
+        }
+
+        const lowerQuery = query.toLowerCase();
+        let firstMatch = null;
+
+        data.nodes.forEach((node) => {
+          const match =
+            node.caption.toLowerCase().includes(lowerQuery) ||
+            node.user.toLowerCase().includes(lowerQuery);
+
+          if (node.__threeObj) {
+            if (match) {
+              node.__threeObj.material.opacity = 1;
+              node.__threeObj.scale.set(20, 20, 1); // Highlight
+              node.__threeObj.material.color.setHex(0xffffff); // White glow
+              if (!firstMatch) firstMatch = node;
+            } else {
+              node.__threeObj.material.opacity = 0.1; // Dim others
+              node.__threeObj.scale.set(5, 5, 1);
+              node.__threeObj.material.color.set(node.color); // Reset color
+            }
+          }
+        });
+
+        // Fly to first match
+        if (firstMatch) {
+          isRotationActive = false;
+          const distRatio =
+            1 + 300 / Math.hypot(firstMatch.x, firstMatch.y, firstMatch.z);
+          Graph.cameraPosition(
+            {
+              x: firstMatch.x * distRatio,
+              y: firstMatch.y * distRatio,
+              z: firstMatch.z * distRatio,
+            }, // new position
+            firstMatch, // lookAt ({ x, y, z })
+            3000 // ms transition duration
+          );
+        }
+      }
+    </script>
+  </body>
+</html>
